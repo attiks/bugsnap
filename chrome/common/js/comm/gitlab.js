@@ -1,5 +1,5 @@
 define(['lib/jquery', 'lib/knockout', 'comm/communicator', 'comm/fieldInfo'], function ($, ko, Communicator, FieldInfo) {
-    var GitlabCommunicator = (function (_super) {
+    var GitlabModule = (function (_super) {
         GitlabCommunicator.prototype = Object.create(_super.prototype);
         function GitlabCommunicator(settings) {
           console.log('gitlab');
@@ -10,11 +10,13 @@ define(['lib/jquery', 'lib/knockout', 'comm/communicator', 'comm/fieldInfo'], fu
             // all issues manually and searching them would be too heavy. Also,
             // Gitlab's API will only load a maximum of 100 issues (this is what
             // we do for now).
+            query = query.toLowerCase();
             return this.ajax(this.Url() + "api/v3/issues", {per_page: 100}, 'GET').then(function (data) {
                 return $.map(data, function (item) {
-                    item.Name = '#' + item.iid + " " + item.title;
+                    var name = '#' + item.iid + " " + item.title;
+                    item.Name = name;
                     item.Id = item.id;
-                    return item;
+                    return -1 === name.toLowerCase().indexOf(query) ? null : item;
                 });
             });
         };
@@ -30,74 +32,66 @@ define(['lib/jquery', 'lib/knockout', 'comm/communicator', 'comm/fieldInfo'], fu
             });
         };
         GitlabCommunicator.prototype.comment = function (issueId, comment, fields) {
+            var body = comment;
+            var imageLink = fields.imageLink;
+            if (imageLink) {
+                body += '\n\n' + imageLink;
+            }
             var data = {
                 id: fields.project.Value(),
                 issue_id: issueId,
-                body: comment
+                body: body
             };
             return this.ajax(this.Url() + "api/v3/projects/" + data.id + '/issues/' + issueId + '/notes', data).then(function (data) {
                 fields.project.Value(fields.project.Value());
                 return data;
             });
         };
-        GitlabCommunicator.prototype.attach = function (issueId, fileContent, fields) {
-            // http://feedback.gitlab.com/forums/176466-general/suggestions/3865548-api-to-attach-attachments-to-notes-issue-comments
-            // This is not implemented yet. Bugsnap needs this!?
-            // load page, get csrf token, submit form, update issue.
-            function b64toBlob(b64Data, contentType, sliceSize) {
-              contentType = contentType || '';
-              sliceSize = sliceSize || 512;
-
-              var byteCharacters = atob(b64Data);
-              var byteArrays = [];
-
-              for (var offset = 0; offset < byteCharacters.length; offset += sliceSize) {
-                  var slice = byteCharacters.slice(offset, offset + sliceSize);
-
-                  var byteNumbers = new Array(slice.length);
-                  for (var i = 0; i < slice.length; i++) {
-                      byteNumbers[i] = slice.charCodeAt(i);
-                  }
-
-                  var byteArray = new Uint8Array(byteNumbers);
-
-                  byteArrays.push(byteArray);
-              }
-
-              var blob = new Blob(byteArrays, {type: contentType});
-              return blob;
-          }
+        GitlabCommunicator.prototype.attach = function (issueId, fileContent, fields, update) {
+            var binary = atob(fileContent);
+            var arr = [];
+            for(var i = 0; i < binary.length; i++) {
+                arr.push(binary.charCodeAt(i));
+            }
+            var fileBlob = new Blob([new Uint8Array(arr)], {type: 'image/png'});
             var self = this;
             var deferred = $.Deferred();
             this.ajax(self.getRedirectUrl(issueId, fields), null, 'GET').then(function(data) {
                 return $(data).find(':input[name="authenticity_token"]:first').val();
             }).then (function (token) {
               var formData = new FormData();
-              formData.append("markdown_img", b64toBlob(fileContent, 'image/png'), 'screenshot.png');
+              var now = new Date();
+              var name = '' + now.toISOString().slice(0, 10) + '-screenshot.png';
+              formData.append('file', fileBlob, name);
               $.ajax({
-                url: fields.project.Option().WebUrl + '/upload_image',
+                url: fields.project.Option().WebUrl + '/uploads',
                 type: 'POST',
                 data: formData,
                 dataType: 'json',
                 processData: false,
                 contentType: false,
                 headers: {
-                  'accept': 'application/json',
+                  'Accept': 'application/json',
                   'X-CSRF-TOKEN': token
                 },
                 success: function(response) {
                   var image = "![" + response.link.alt + "](" + response.link.url + ")";
                   // Load & update the issue.
-                  self.loadIssue(issueId, fields).then(function (issue) {
-                    var update = {
-                      id: fields.project.Value(),
-                      issue_id: issueId,
-                      description: issue.description + "\n\n" + image
-                    };
-                    self.ajax(self.Url() + "api/v3/projects/" + fields.project.Value() + "/issues/" + issueId, update, 'PUT').done(function () {
-                      deferred.resolve();
+                  if (update) {
+                    self.loadIssue(issueId, fields).then(function (issue) {
+                      var update = {
+                        id: fields.project.Value(),
+                        issue_id: issueId,
+                        description: issue.description + "\n\n" + image
+                      };
+                      self.ajax(self.Url() + "api/v3/projects/" + fields.project.Value() + "/issues/" + issueId, update, 'PUT').done(function () {
+                        deferred.resolve();
+                      });
                     });
-                  });
+                  } else {
+                      fields.imageLink = image;
+                      deferred.resolve();
+                  }
                 },
                 error: function (jqXHR, statusText) {
                   if (jqXHR.status === 401) {
@@ -113,7 +107,7 @@ define(['lib/jquery', 'lib/knockout', 'comm/communicator', 'comm/fieldInfo'], fu
                 title: title,
                 description: description,
                 id: fields.project.Value(),
-                labels: labels.join(',')
+                labels: labels ? labels.join(',') : ''
             };
             return this.ajax(this.Url() + 'api/v3/projects/' + fields.project.Value() + '/issues', data).then(function (data) {
               data.Id = data.id;
@@ -256,5 +250,5 @@ define(['lib/jquery', 'lib/knockout', 'comm/communicator', 'comm/fieldInfo'], fu
         };
         return GitlabCommunicator;
     })(Communicator);
-    return GitlabCommunicator;
+    return GitlabModule;
 });

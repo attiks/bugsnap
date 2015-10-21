@@ -35,7 +35,7 @@ define(['lib/jquery', 'lib/knockout', 'lib/knockout.validation', 'comm', 'lib/jq
             this.AttachErrors = ko.validation.group([this.Issue, this.Comment]);
             $("#issue").autocomplete({
                 appendTo: "#issue_dialog",
-                minLength: 3,
+                minLength: 2,
                 source: function(request, response) {
                     var search = self.Communicator.search(request.term);
                     if (search != null) {
@@ -119,8 +119,8 @@ define(['lib/jquery', 'lib/knockout', 'lib/knockout.validation', 'comm', 'lib/jq
             var imageData = this.Parent.Editor.getImageData();
             var self = this;
             $("#issue_dialog").showLoading();
-            this.Communicator.comment(this.IssueId(), this.Comment(), this.Fields).then(function () {
-                  return self.Communicator.attach(self.IssueId(), imageData, self.Fields);
+            this.Communicator.attach(self.IssueId(), imageData, self.Fields).then(function() {
+                return self.Communicator.comment(self.IssueId(), self.Comment(), self.Fields);
             }).done(function () {
                 $("#issue_dialog").hideLoading().dialog("close");
                 location.href = self.Communicator.getRedirectUrl(self.IssueId(), self.Fields);
@@ -153,7 +153,7 @@ define(['lib/jquery', 'lib/knockout', 'lib/knockout.validation', 'comm', 'lib/jq
             }
             create.then(function (data) {
                     issueId = data.Id;
-                    return self.Communicator.attach(issueId, imageData, self.Fields);
+                    return self.Communicator.attach(issueId, imageData, self.Fields, true);
                 }).done(function () {
                     $("#issue_dialog").hideLoading().dialog("close");
                     location.href = self.Communicator.getRedirectUrl(issueId, self.Fields);
